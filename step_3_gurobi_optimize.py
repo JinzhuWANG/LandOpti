@@ -1,0 +1,150 @@
+"""
+Step 3: Build and solve the Gurobi land-use optimisation model.
+
+Objective: Maximise total net benefit (profit minus transition cost)
+Subject to:
+    - Each crop cell is assigned to exactly one crop
+    - Area targets (min/max fraction) for each crop
+    - Urban cells remain fixed (handled by excluding them from the model)
+
+Reads setup from step_2_setup_cost.py via exec (all variables shared).
+"""
+
+import numpy as np
+import gurobipy as gp
+from gurobipy import GRB
+import time
+
+# ── Run step 2 to load all parameters ────────────────────────────────────────
+exec(open("step_2_setup_cost.py").read())
+
+# ── Build Gurobi Model ──────────────────────────────────────────────────────
+print("\n" + "=" * 70)
+print("Building Gurobi model...")
+t0 = time.time()
+
+m = gp.Model("LandUseOptimisation")
+m.Params.LogToConsole = 1
+
+# Decision variables: x[i, j] = 1 if crop cell i is assigned to crop j
+x = m.addVars(N_CELLS, N_CROPS, vtype=GRB.BINARY, name="x")
+
+# Objective: maximise total net benefit
+obj = gp.quicksum(
+    net_benefit[i, j] * x[i, j]
+    for i in range(N_CELLS)
+    for j in range(N_CROPS)
+)
+m.setObjective(obj, GRB.MAXIMIZE)
+
+# Constraint 1: each cell assigned to exactly one crop
+for i in range(N_CELLS):
+    m.addConstr(
+        gp.quicksum(x[i, j] for j in range(N_CROPS)) == 1,
+        name=f"assign_{i}"
+    )
+
+# Constraint 2: area targets (fraction of crop cells, excluding urban)
+for j, crop in enumerate(CROPS):
+    total_j = gp.quicksum(x[i, j] for i in range(N_CELLS))
+    m.addConstr(total_j >= TARGET_MIN[crop] * N_CELLS, name=f"min_{crop}")
+    m.addConstr(total_j <= TARGET_MAX[crop] * N_CELLS, name=f"max_{crop}")
+
+build_time = time.time() - t0
+print(f"Model built in {build_time:.2f}s — {m.NumVars} vars, {m.NumConstrs} constraints")
+
+# ── Solve ────────────────────────────────────────────────────────────────────
+print("\nSolving...")
+t1 = time.time()
+m.optimize()
+solve_time = time.time() - t1
+
+# ── Extract results ──────────────────────────────────────────────────────────
+if m.Status == GRB.OPTIMAL:
+    print(f"\nOptimal solution found in {solve_time:.2f}s")
+
+    # Extract optimal assignment for each crop cell
+    opt_map = np.zeros(N_CELLS, dtype=int)
+    for i in range(N_CELLS):
+        for j in range(N_CROPS):
+            if x[i, j].X > 0.5:
+                opt_map[i] = j
+
+    # Count changes
+    changes = int(np.sum(opt_map != initial_map))
+
+    # Final counts
+    final_counts = {c: int(np.sum(opt_map == k)) for k, c in enumerate(CROPS)}
+
+    # Cost breakdown
+    total_revenue = sum(REVENUE[CROPS[j]] * final_counts[CROPS[j]] for j in range(N_CROPS))
+    total_cost = sum(COST[CROPS[j]] * final_counts[CROPS[j]] for j in range(N_CROPS))
+    total_trans = 0.0
+    for i in range(N_CELLS):
+        orig, new = initial_map[i], opt_map[i]
+        total_trans += trans_arr[orig, new]
+
+    # ── Print results ────────────────────────────────────────────────────────
+    print(f"\nObjective (net profit): {m.ObjVal:,.0f}")
+    print(f"  Revenue:         {total_revenue:,.0f}")
+    print(f"  Operating cost:  -{total_cost:,.0f}")
+    print(f"  Transition cost: -{total_trans:,.0f}")
+    print(f"\nCells changed: {changes} / {N_CELLS} ({100 * changes / N_CELLS:.1f}%)")
+
+    print("\nFinal land use (crop cells):")
+    for c, cnt in final_counts.items():
+        print(f"  {c}: {cnt} cells ({100 * cnt / N_CELLS:.1f}%)")
+
+    print("\nTarget compliance:")
+    for j, crop in enumerate(CROPS):
+        frac = final_counts[crop] / N_CELLS
+        print(f"  {crop}: {frac:.1%}  (target: {TARGET_MIN[crop]:.0%} - {TARGET_MAX[crop]:.0%})")
+
+    # ── Write optimised map back to raster ───────────────────────────────────
+    # Reconstruct full raster: urban cells keep value 3, crop cells get new assignment
+    opt_full = lumap_flat.copy()
+    opt_full[crop_indices] = opt_map
+
+    opt_raster = opt_full.reshape(lumap_vals.shape)
+    opt_xr = lumap.copy(data=opt_raster.astype(float))
+    # Set cells that were originally NaN back to NaN
+    opt_xr = opt_xr.where(~np.isnan(lumap.values))
+
+    out_path = "data/LUMAP/CDL2019_clip_RES_100_optimised.tif"
+    opt_xr.rio.to_raster(out_path, compress="LZW")
+    print(f"\nOptimised land-use map saved to: {out_path}")
+
+    # ── Save summary to JSON ─────────────────────────────────────────────────
+    import json
+    result = {
+        "crops": CROPS,
+        "revenue": REVENUE,
+        "cost": COST,
+        "profit": PROFIT,
+        "trans_cost": {f"{f}->{t}": v for (f, t), v in TRANS_COST.items()},
+        "targets": {"min": TARGET_MIN, "max": TARGET_MAX},
+        "initial_counts": {c: int(np.sum(initial_map == k)) for k, c in enumerate(CROPS)},
+        "final_counts": final_counts,
+        "n_crop_cells": N_CELLS,
+        "n_urban_cells": n_urban,
+        "cells_changed": changes,
+        "obj_val": round(m.ObjVal),
+        "total_revenue": round(total_revenue),
+        "total_cost": round(total_cost),
+        "total_trans": round(total_trans),
+        "solve_time": round(solve_time, 3),
+        "build_time": round(build_time, 3),
+        "n_vars": m.NumVars,
+        "n_constrs": m.NumConstrs,
+    }
+    with open("data/result.json", "w") as f:
+        json.dump(result, f, indent=2)
+    print("Summary saved to data/result.json")
+
+else:
+    print(f"Model status: {m.Status} (not optimal)")
+    if m.Status == GRB.INFEASIBLE:
+        print("Model is infeasible — check target constraints.")
+        m.computeIIS()
+        m.write("data/infeasible.ilp")
+        print("IIS written to data/infeasible.ilp")
