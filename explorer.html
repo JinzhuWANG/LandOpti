@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LandOpti — Interactive Land-Use Explorer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #333; }
+
+  header { background: #2c3e50; color: white; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 20px; font-weight: 600; }
+  header .badge { background: #27ae60; padding: 3px 10px; border-radius: 12px; font-size: 12px; }
+
+  .container { display: flex; gap: 20px; padding: 20px; max-width: 1400px; margin: 0 auto; }
+
+  /* Left panel — controls */
+  .panel { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.12); padding: 20px; }
+  .controls { width: 320px; flex-shrink: 0; }
+  .controls h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .5px; color: #888; margin-bottom: 12px; margin-top: 20px; }
+  .controls h2:first-child { margin-top: 0; }
+
+  .slider-group { margin-bottom: 14px; }
+  .slider-label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+  .slider-label .val { font-weight: 600; color: #2c3e50; min-width: 50px; text-align: right; }
+  input[type="range"] { width: 100%; accent-color: #2c3e50; }
+
+  .radio-group { display: flex; gap: 12px; margin-bottom: 8px; }
+  .radio-group label { font-size: 13px; cursor: pointer; padding: 4px 12px; border: 1px solid #ddd; border-radius: 4px; transition: all .15s; }
+  .radio-group label.active { background: #2c3e50; color: white; border-color: #2c3e50; }
+  .radio-group input { display: none; }
+
+  .scenario-info { font-size: 12px; color: #888; margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; }
+
+  /* Right panel — map + stats */
+  .main { flex: 1; display: flex; flex-direction: column; gap: 20px; }
+
+  .map-wrapper { position: relative; }
+  .map-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+  .map-tabs button { background: #e0e0e0; border: none; padding: 6px 16px; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 13px; }
+  .map-tabs button.active { background: white; font-weight: 600; }
+
+  .map-container { display: flex; gap: 16px; align-items: flex-start; }
+  .map-box { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.12); padding: 12px; text-align: center; flex: 1; min-width: 0; }
+  .map-box img { width: 100%; height: auto; image-rendering: pixelated; border: 1px solid #eee; }
+  .map-box .title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+
+  .legend { display: flex; gap: 16px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  .legend-swatch { width: 14px; height: 14px; border-radius: 2px; border: 1px solid #ccc; }
+
+  /* Stats */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .stat-card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.12); padding: 16px; }
+  .stat-card .label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: #888; }
+  .stat-card .value { font-size: 22px; font-weight: 700; color: #2c3e50; margin-top: 4px; }
+  .stat-card .sub { font-size: 12px; color: #aaa; margin-top: 2px; }
+
+  /* Bar chart */
+  .bar-chart { margin-top: 12px; }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+  .bar-row .crop-name { width: 60px; text-align: right; }
+  .bar-track { flex: 1; height: 20px; background: #eee; border-radius: 3px; position: relative; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; transition: width .3s ease; }
+  .bar-fill.rice { background: #2ca02c; }
+  .bar-fill.maize { background: #FFD700; }
+  .bar-fill.soybean { background: #FF8C00; }
+  .bar-pct { width: 48px; font-weight: 600; }
+  .bar-target { position: absolute; top: 0; bottom: 0; border-left: 2px dashed rgba(0,0,0,.4); }
+
+  .infeasible-overlay { position: absolute; inset: 0; background: rgba(255,255,255,.85); display: flex; align-items: center; justify-content: center; border-radius: 8px; z-index: 10; }
+  .infeasible-overlay span { font-size: 18px; font-weight: 700; color: #e74c3c; }
+
+  .loading { opacity: .5; transition: opacity .15s; }
+
+  @media (max-width: 900px) {
+    .container { flex-direction: column; }
+    .controls { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>LandOpti</h1>
+  <span class="badge">Interactive Explorer</span>
+</header>
+
+<div class="container">
+  <!-- Controls -->
+  <div class="panel controls" id="controls">
+    <h2>Crop Profits (yuan/cell)</h2>
+    <div class="slider-group">
+      <div class="slider-label"><span>Rice</span><span class="val" id="v-rice">650</span></div>
+      <input type="range" id="s-rice" min="0" max="4" value="2" step="1">
+    </div>
+    <div class="slider-group">
+      <div class="slider-label"><span>Maize</span><span class="val" id="v-maize">600</span></div>
+      <input type="range" id="s-maize" min="0" max="4" value="2" step="1">
+    </div>
+    <div class="slider-group">
+      <div class="slider-label"><span>SoyBean</span><span class="val" id="v-soy">650</span></div>
+      <input type="range" id="s-soy" min="0" max="4" value="2" step="1">
+    </div>
+
+    <h2>Transition Cost Scale</h2>
+    <div class="slider-group">
+      <div class="slider-label"><span>Multiplier</span><span class="val" id="v-trans">1.0x</span></div>
+      <input type="range" id="s-trans" min="0" max="3" value="2" step="1">
+    </div>
+
+    <h2>Area Constraints</h2>
+    <div class="radio-group" id="area-radios">
+      <label><input type="radio" name="area" value="loose">Loose</label>
+      <label class="active"><input type="radio" name="area" value="medium" checked>Medium</label>
+      <label><input type="radio" name="area" value="tight">Tight</label>
+    </div>
+    <div id="area-detail" style="font-size:12px; color:#888; margin-top:4px;"></div>
+
+    <div class="scenario-info" id="scenario-info">Loading...</div>
+  </div>
+
+  <!-- Main content -->
+  <div class="main">
+    <div class="map-container">
+      <div class="map-box">
+        <div class="title">Initial Land Use</div>
+        <img id="img-initial" alt="Initial land use map" >
+      </div>
+      <div class="map-box" style="position:relative;">
+        <div class="title" id="opt-title">Optimised Land Use</div>
+        <img id="img-optimised" alt="Optimised land use map" >
+        <div class="infeasible-overlay" id="infeasible" style="display:none;">
+          <span>No Feasible Solution</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><div class="legend-swatch" style="background:#2ca02c"></div>Rice</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#FFD700"></div>Maize</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#FF8C00"></div>SoyBean</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#808080"></div>Urban</div>
+    </div>
+
+    <div class="stats-grid" id="stats">
+      <div class="stat-card"><div class="label">Objective</div><div class="value" id="st-obj">—</div></div>
+      <div class="stat-card"><div class="label">Cells Changed</div><div class="value" id="st-changed">—</div><div class="sub" id="st-changed-pct"></div></div>
+      <div class="stat-card"><div class="label">Solve Time</div><div class="value" id="st-time">—</div></div>
+    </div>
+
+    <div class="panel">
+      <h2 style="font-size:14px; text-transform:uppercase; letter-spacing:.5px; color:#888; margin-bottom:12px;">Crop Allocation</h2>
+      <div class="bar-chart" id="bar-chart"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let meta = null;       // index.json
+let scenarioMap = {};  // key -> scenario index in meta.scenarios
+let imgCache = {};     // preloaded images
+let currentKey = "";
+
+// Grid axes (populated from index.json)
+let AXES = {};
+
+async function init() {
+  try {
+    const res = await fetch("data/web/index.json");
+    meta = await res.json();
+  } catch (e) {
+    document.getElementById("scenario-info").textContent =
+      "Failed to load data/web/index.json — run step_5_batch_precompute.py first, then serve with: python -m http.server";
+    return;
+  }
+
+  AXES = meta.grid;
+
+  // Setup sliders to match actual grid
+  setupSlider("s-rice",  "v-rice",  AXES.rice_profit,  v => v);
+  setupSlider("s-maize", "v-maize", AXES.maize_profit, v => v);
+  setupSlider("s-soy",   "v-soy",   AXES.soy_profit,   v => v);
+  setupSlider("s-trans", "v-trans", AXES.trans_scale,  v => v + "x");
+
+  // Area radios
+  const radios = document.getElementById("area-radios");
+  // Rebuild radios from grid
+  radios.innerHTML = "";
+  AXES.area_mode.forEach((mode, i) => {
+    const label = document.createElement("label");
+    if (i === Math.floor(AXES.area_mode.length / 2)) label.className = "active";
+    const input = document.createElement("input");
+    input.type = "radio"; input.name = "area"; input.value = mode;
+    if (i === Math.floor(AXES.area_mode.length / 2)) input.checked = true;
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(mode.charAt(0).toUpperCase() + mode.slice(1)));
+    radios.appendChild(label);
+  });
+  radios.querySelectorAll("input").forEach(r => r.addEventListener("change", onAreaChange));
+
+  // Build scenario lookup
+  meta.scenarios.forEach(s => {
+    const key = makeKey(s.params);
+    scenarioMap[key] = s;
+  });
+
+  // Load initial image
+  document.getElementById("img-initial").src = "data/web/initial.png";
+
+  // Initial render
+  updateAreaDetail();
+  updateScenario();
+}
+
+function setupSlider(sliderId, valId, values, fmt) {
+  const slider = document.getElementById(sliderId);
+  const valEl = document.getElementById(valId);
+  slider.min = 0;
+  slider.max = values.length - 1;
+  // Default to middle
+  slider.value = Math.floor(values.length / 2);
+  valEl.textContent = fmt(values[slider.value]);
+  slider.addEventListener("input", () => {
+    valEl.textContent = fmt(values[slider.value]);
+    updateScenario();
+  });
+}
+
+function onAreaChange() {
+  document.querySelectorAll("#area-radios label").forEach(l => l.classList.remove("active"));
+  const checked = document.querySelector("#area-radios input:checked");
+  checked.parentElement.classList.add("active");
+  updateAreaDetail();
+  updateScenario();
+}
+
+function updateAreaDetail() {
+  const mode = document.querySelector("#area-radios input:checked").value;
+  const t = meta.area_targets[mode];
+  if (!t) return;
+  const el = document.getElementById("area-detail");
+  el.innerHTML = Object.keys(t.min).map(c =>
+    `${c}: ${(t.min[c]*100).toFixed(0)}%–${(t.max[c]*100).toFixed(0)}%`
+  ).join(" &nbsp;|&nbsp; ");
+}
+
+function getParams() {
+  return {
+    rice_profit:  AXES.rice_profit[document.getElementById("s-rice").value],
+    maize_profit: AXES.maize_profit[document.getElementById("s-maize").value],
+    soy_profit:   AXES.soy_profit[document.getElementById("s-soy").value],
+    trans_scale:  AXES.trans_scale[document.getElementById("s-trans").value],
+    area_mode:    document.querySelector("#area-radios input:checked").value,
+  };
+}
+
+function makeKey(p) {
+  return `${p.rice_profit}_${p.maize_profit}_${p.soy_profit}_${p.trans_scale}_${p.area_mode}`;
+}
+
+function updateScenario() {
+  const params = getParams();
+  const key = makeKey(params);
+  if (key === currentKey) return;
+  currentKey = key;
+
+  const scenario = scenarioMap[key];
+  const infoEl = document.getElementById("scenario-info");
+
+  if (!scenario) {
+    infoEl.textContent = "Scenario not found in precomputed data";
+    return;
+  }
+
+  infoEl.textContent = `Scenario ${scenario.id + 1} / ${meta.scenarios.length} — ` +
+    (scenario.feasible ? "Optimal" : "Infeasible") +
+    ` (${scenario.solve_time}s)`;
+
+  const infEl = document.getElementById("infeasible");
+  const imgOpt = document.getElementById("img-optimised");
+
+  if (!scenario.feasible) {
+    infEl.style.display = "flex";
+    imgOpt.classList.add("loading");
+    clearStats();
+    return;
+  }
+
+  infEl.style.display = "none";
+
+  // Load image
+  if (imgCache[scenario.png]) {
+    imgOpt.src = imgCache[scenario.png].src;
+    imgOpt.classList.remove("loading");
+  } else {
+    imgOpt.classList.add("loading");
+    const img = new Image();
+    img.onload = () => {
+      imgCache[scenario.png] = img;
+      if (currentKey === key) {
+        imgOpt.src = img.src;
+        imgOpt.classList.remove("loading");
+      }
+    };
+    img.src = "data/web/maps/" + scenario.png;
+  }
+
+  // Stats
+  document.getElementById("st-obj").textContent = scenario.obj_val.toLocaleString();
+  document.getElementById("st-changed").textContent = scenario.cells_changed.toLocaleString();
+  document.getElementById("st-changed-pct").textContent = scenario.pct_changed + "% of crop cells";
+  document.getElementById("st-time").textContent = scenario.solve_time + "s";
+
+  // Bar chart
+  renderBars(scenario, params);
+
+  // Preload neighbors
+  preloadNeighbors(params);
+}
+
+function clearStats() {
+  document.getElementById("st-obj").textContent = "—";
+  document.getElementById("st-changed").textContent = "—";
+  document.getElementById("st-changed-pct").textContent = "";
+  document.getElementById("st-time").textContent = "—";
+  document.getElementById("bar-chart").innerHTML = "";
+}
+
+function renderBars(scenario, params) {
+  const container = document.getElementById("bar-chart");
+  const mode = params.area_mode;
+  const targets = meta.area_targets[mode];
+  const total = meta.n_crop_cells;
+
+  const crops = [
+    { name: "Rice",    key: "Rice",    cls: "rice",    color: "#2ca02c" },
+    { name: "Maize",   key: "Maize",   cls: "maize",   color: "#FFD700" },
+    { name: "SoyBean", key: "SoyBean", cls: "soybean", color: "#FF8C00" },
+  ];
+
+  let html = "";
+  crops.forEach(c => {
+    const count = scenario.final_counts[c.key];
+    const pct = (count / total * 100);
+    const initCount = meta.initial_counts[c.key];
+    const initPct = (initCount / total * 100);
+    const minPct = targets.min[c.key] * 100;
+    const maxPct = targets.max[c.key] * 100;
+
+    html += `<div class="bar-row">
+      <span class="crop-name">${c.name}</span>
+      <div class="bar-track">
+        <div class="bar-fill ${c.cls}" style="width:${pct}%"></div>
+        <div class="bar-target" style="left:${minPct}%" title="min ${minPct.toFixed(0)}%"></div>
+        <div class="bar-target" style="left:${maxPct}%" title="max ${maxPct.toFixed(0)}%"></div>
+      </div>
+      <span class="bar-pct">${pct.toFixed(1)}%</span>
+    </div>`;
+  });
+
+  html += `<div style="font-size:11px; color:#aaa; margin-top:4px;">Dashed lines = target min/max bounds</div>`;
+  container.innerHTML = html;
+}
+
+function preloadNeighbors(params) {
+  // Preload scenarios reachable by one slider step in each direction
+  const axes = [
+    { key: "rice_profit",  slider: "s-rice",  values: AXES.rice_profit },
+    { key: "maize_profit", slider: "s-maize", values: AXES.maize_profit },
+    { key: "soy_profit",   slider: "s-soy",   values: AXES.soy_profit },
+    { key: "trans_scale",  slider: "s-trans", values: AXES.trans_scale },
+  ];
+
+  axes.forEach(ax => {
+    const idx = parseInt(document.getElementById(ax.slider).value);
+    [-1, 1].forEach(delta => {
+      const ni = idx + delta;
+      if (ni < 0 || ni >= ax.values.length) return;
+      const p = { ...params, [ax.key]: ax.values[ni] };
+      const s = scenarioMap[makeKey(p)];
+      if (s && s.feasible && s.png && !imgCache[s.png]) {
+        const img = new Image();
+        img.src = "data/web/maps/" + s.png;
+        imgCache[s.png] = img;
+      }
+    });
+  });
+}
+
+document.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>

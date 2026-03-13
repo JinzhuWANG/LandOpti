@@ -15,8 +15,25 @@ import gurobipy as gp
 from gurobipy import GRB
 import time
 
-# ── Run step 2 to load all parameters ────────────────────────────────────────
-exec(open("step_2_setup_cost.py").read())
+from step_2_setup_cost import (
+    COST,
+    CROPS,
+    N_CELLS,
+    N_CROPS,
+    PROFIT,
+    REVENUE,
+    TARGET_MAX,
+    TARGET_MIN,
+    TRANS_COST,
+    crop_indices,
+    initial_map,
+    lumap,
+    lumap_flat,
+    lumap_vals,
+    n_urban,
+    net_benefit,
+    trans_arr,
+)
 
 # ── Build Gurobi Model ──────────────────────────────────────────────────────
 print("\n" + "=" * 70)

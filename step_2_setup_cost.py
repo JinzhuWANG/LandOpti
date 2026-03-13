@@ -25,28 +25,28 @@ CROP_IDX = {c: i for i, c in enumerate(CROPS)}     # Rice:0, Maize:1, SoyBean:2
 LANDUSE_IDX = {c: i for i, c in enumerate(LANDUSES)}
 
 # ── Revenue and cost per cell (yuan/cell/year) ───────────────────────────────
-REVENUE = {"Rice": 1200, "Maize": 900, "SoyBean": 1000}
-COST    = {"Rice": 500,  "Maize": 350, "SoyBean": 400}
+REVENUE = {"Rice": 1200, "Maize": 1000, "SoyBean": 1100}
+COST    = {"Rice": 550,  "Maize": 400,  "SoyBean": 450}
 PROFIT  = {c: REVENUE[c] - COST[c] for c in CROPS}
-# => Rice: 700, Maize: 550, SoyBean: 600
+# => Rice: 650, Maize: 600, SoyBean: 650  (narrow gaps discourage monoculture)
 
 # ── Transition costs (from -> to), 0 if same crop ────────────────────────────
 # Only defined for crop-to-crop transitions (Urban cells are fixed)
 TRANS_COST = {
     ("Rice",    "Rice"):    0,
-    ("Rice",    "Maize"):   180,
-    ("Rice",    "SoyBean"): 150,
-    ("Maize",   "Rice"):    200,
+    ("Rice",    "Maize"):   350,
+    ("Rice",    "SoyBean"): 300,
+    ("Maize",   "Rice"):    380,
     ("Maize",   "Maize"):   0,
-    ("Maize",   "SoyBean"): 120,
-    ("SoyBean", "Rice"):    170,
-    ("SoyBean", "Maize"):   130,
+    ("Maize",   "SoyBean"): 280,
+    ("SoyBean", "Rice"):    360,
+    ("SoyBean", "Maize"):   300,
     ("SoyBean", "SoyBean"): 0,
 }
 
 # ── Policy area targets (fractions of total CROP cells, excluding urban) ─────
-TARGET_MIN = {"Rice": 0.25, "Maize": 0.20, "SoyBean": 0.10}
-TARGET_MAX = {"Rice": 0.60, "Maize": 0.50, "SoyBean": 0.40}
+TARGET_MIN = {"Rice": 0.30, "Maize": 0.30, "SoyBean": 0.25}
+TARGET_MAX = {"Rice": 0.40, "Maize": 0.40, "SoyBean": 0.35}
 
 # ── Flatten the raster and separate urban vs crop cells ──────────────────────
 lumap_vals = lumap.values

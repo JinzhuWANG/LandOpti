@@ -1,2 +1,4 @@
 data
 .claude/settings.local.json
+
+**/*.pyc
