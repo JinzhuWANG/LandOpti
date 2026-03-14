@@ -22,10 +22,10 @@ from step_2_setup_cost import (
     N_CROPS,
     PROFIT,
     REVENUE,
-    TARGET_MAX,
-    TARGET_MIN,
+    AREA_TARGET,
     TRANS_COST,
     crop_indices,
+    dist_crop,
     initial_map,
     lumap,
     lumap_flat,
@@ -64,8 +64,9 @@ for i in range(N_CELLS):
 # Constraint 2: area targets (fraction of crop cells, excluding urban)
 for j, crop in enumerate(CROPS):
     total_j = gp.quicksum(x[i, j] for i in range(N_CELLS))
-    m.addConstr(total_j >= TARGET_MIN[crop] * N_CELLS, name=f"min_{crop}")
-    m.addConstr(total_j <= TARGET_MAX[crop] * N_CELLS, name=f"max_{crop}")
+    lo, hi = AREA_TARGET[crop]
+    m.addConstr(total_j >= lo * N_CELLS, name=f"min_{crop}")
+    m.addConstr(total_j <= hi * N_CELLS, name=f"max_{crop}")
 
 build_time = time.time() - t0
 print(f"Model built in {build_time:.2f}s — {m.NumVars} vars, {m.NumConstrs} constraints")
@@ -90,7 +91,7 @@ if m.Status == GRB.OPTIMAL:
     # Count changes
     changes = int(np.sum(opt_map != initial_map))
 
-    # Final counts
+    # Final counts (Tree cells that were originally non-Tree are also counted as changes)
     final_counts = {c: int(np.sum(opt_map == k)) for k, c in enumerate(CROPS)}
 
     # Cost breakdown
@@ -100,12 +101,14 @@ if m.Status == GRB.OPTIMAL:
     for i in range(N_CELLS):
         orig, new = initial_map[i], opt_map[i]
         total_trans += trans_arr[orig, new]
+    total_dist = float(np.sum(dist_crop))
 
     # ── Print results ────────────────────────────────────────────────────────
     print(f"\nObjective (net profit): {m.ObjVal:,.0f}")
     print(f"  Revenue:         {total_revenue:,.0f}")
     print(f"  Operating cost:  -{total_cost:,.0f}")
     print(f"  Transition cost: -{total_trans:,.0f}")
+    print(f"  Distance cost:   -{total_dist:,.0f}")
     print(f"\nCells changed: {changes} / {N_CELLS} ({100 * changes / N_CELLS:.1f}%)")
 
     print("\nFinal land use (crop cells):")
@@ -115,15 +118,19 @@ if m.Status == GRB.OPTIMAL:
     print("\nTarget compliance:")
     for j, crop in enumerate(CROPS):
         frac = final_counts[crop] / N_CELLS
-        print(f"  {crop}: {frac:.1%}  (target: {TARGET_MIN[crop]:.0%} - {TARGET_MAX[crop]:.0%})")
+        lo, hi = AREA_TARGET[crop]
+        print(f"  {crop}: {frac:.1%}  (target: {lo:.0%} - {hi:.0%})")
 
     # ── Write optimised map back to raster ───────────────────────────────────
     # Reconstruct full raster: urban cells keep value 3, crop cells get new assignment
+    # Remap crop index 3 (Tree) to raster value 4 to avoid conflict with Urban (3)
+    opt_raster_vals = opt_map.copy()
+    opt_raster_vals[opt_raster_vals == 3] = 4  # Tree → raster class 4
     opt_full = lumap_flat.copy()
-    opt_full[crop_indices] = opt_map
+    opt_full[crop_indices] = opt_raster_vals
 
-    opt_raster = opt_full.reshape(lumap_vals.shape)
-    opt_xr = lumap.copy(data=opt_raster.astype(float))
+    opt_raster_2d = opt_full.reshape(lumap_vals.shape)
+    opt_xr = lumap.copy(data=opt_raster_2d.astype(float))
     # Set cells that were originally NaN back to NaN
     opt_xr = opt_xr.where(~np.isnan(lumap.values))
 
@@ -139,7 +146,7 @@ if m.Status == GRB.OPTIMAL:
         "cost": COST,
         "profit": PROFIT,
         "trans_cost": {f"{f}->{t}": v for (f, t), v in TRANS_COST.items()},
-        "targets": {"min": TARGET_MIN, "max": TARGET_MAX},
+        "targets": {crop: {"min": lo, "max": hi} for crop, (lo, hi) in AREA_TARGET.items()},
         "initial_counts": {c: int(np.sum(initial_map == k)) for k, c in enumerate(CROPS)},
         "final_counts": final_counts,
         "n_crop_cells": N_CELLS,
@@ -149,6 +156,7 @@ if m.Status == GRB.OPTIMAL:
         "total_revenue": round(total_revenue),
         "total_cost": round(total_cost),
         "total_trans": round(total_trans),
+        "total_dist": round(total_dist),
         "solve_time": round(solve_time, 3),
         "build_time": round(build_time, 3),
         "n_vars": m.NumVars,

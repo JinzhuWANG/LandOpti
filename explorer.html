@@ -62,9 +62,10 @@
   .bar-row .crop-name { width: 60px; text-align: right; }
   .bar-track { flex: 1; height: 20px; background: #eee; border-radius: 3px; position: relative; overflow: hidden; }
   .bar-fill { height: 100%; border-radius: 3px; transition: width .3s ease; }
-  .bar-fill.rice { background: #2ca02c; }
-  .bar-fill.maize { background: #FFD700; }
-  .bar-fill.soybean { background: #FF8C00; }
+  .bar-fill.rice { background: #00BFFF; }
+  .bar-fill.maize { background: #FFA500; }
+  .bar-fill.soybean { background: #2ca02c; }
+  .bar-fill.tree { background: #006400; }
   .bar-pct { width: 48px; font-weight: 600; }
   .bar-target { position: absolute; top: 0; bottom: 0; border-left: 2px dashed rgba(0,0,0,.4); }
 
@@ -108,6 +109,12 @@
       <input type="range" id="s-trans" min="0" max="3" value="2" step="1">
     </div>
 
+    <h2>Tree Target (min %)</h2>
+    <div class="slider-group">
+      <div class="slider-label"><span>Tree min</span><span class="val" id="v-tree">5%</span></div>
+      <input type="range" id="s-tree" min="0" max="2" value="0" step="1">
+    </div>
+
     <h2>Area Constraints</h2>
     <div class="radio-group" id="area-radios">
       <label><input type="radio" name="area" value="loose">Loose</label>
@@ -136,10 +143,11 @@
     </div>
 
     <div class="legend">
-      <div class="legend-item"><div class="legend-swatch" style="background:#2ca02c"></div>Rice</div>
-      <div class="legend-item"><div class="legend-swatch" style="background:#FFD700"></div>Maize</div>
-      <div class="legend-item"><div class="legend-swatch" style="background:#FF8C00"></div>SoyBean</div>
-      <div class="legend-item"><div class="legend-swatch" style="background:#808080"></div>Urban</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#00BFFF"></div>Rice</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#FFA500"></div>Maize</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#2ca02c"></div>SoyBean</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#FF0000"></div>Urban</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#006400"></div>Tree</div>
     </div>
 
     <div class="stats-grid" id="stats">
@@ -181,10 +189,10 @@ async function init() {
   setupSlider("s-maize", "v-maize", AXES.maize_profit, v => v);
   setupSlider("s-soy",   "v-soy",   AXES.soy_profit,   v => v);
   setupSlider("s-trans", "v-trans", AXES.trans_scale,  v => v + "x");
+  setupSlider("s-tree",  "v-tree",  AXES.tree_target,  v => (v * 100).toFixed(0) + "%");
 
   // Area radios
   const radios = document.getElementById("area-radios");
-  // Rebuild radios from grid
   radios.innerHTML = "";
   AXES.area_mode.forEach((mode, i) => {
     const label = document.createElement("label");
@@ -217,7 +225,6 @@ function setupSlider(sliderId, valId, values, fmt) {
   const valEl = document.getElementById(valId);
   slider.min = 0;
   slider.max = values.length - 1;
-  // Default to middle
   slider.value = Math.floor(values.length / 2);
   valEl.textContent = fmt(values[slider.value]);
   slider.addEventListener("input", () => {
@@ -238,10 +245,14 @@ function updateAreaDetail() {
   const mode = document.querySelector("#area-radios input:checked").value;
   const t = meta.area_targets[mode];
   if (!t) return;
+  const treeTgt = AXES.tree_target[document.getElementById("s-tree").value];
+  const treeMax = Math.min(treeTgt + 0.10, 0.30);
   const el = document.getElementById("area-detail");
-  el.innerHTML = Object.keys(t.min).map(c =>
+  const parts = Object.keys(t.min).map(c =>
     `${c}: ${(t.min[c]*100).toFixed(0)}%–${(t.max[c]*100).toFixed(0)}%`
-  ).join(" &nbsp;|&nbsp; ");
+  );
+  parts.push(`Tree: ${(treeTgt*100).toFixed(0)}%–${(treeMax*100).toFixed(0)}%`);
+  el.innerHTML = parts.join(" &nbsp;|&nbsp; ");
 }
 
 function getParams() {
@@ -251,11 +262,12 @@ function getParams() {
     soy_profit:   AXES.soy_profit[document.getElementById("s-soy").value],
     trans_scale:  AXES.trans_scale[document.getElementById("s-trans").value],
     area_mode:    document.querySelector("#area-radios input:checked").value,
+    tree_target:  AXES.tree_target[document.getElementById("s-tree").value],
   };
 }
 
 function makeKey(p) {
-  return `${p.rice_profit}_${p.maize_profit}_${p.soy_profit}_${p.trans_scale}_${p.area_mode}`;
+  return `${p.rice_profit}_${p.maize_profit}_${p.soy_profit}_${p.trans_scale}_${p.area_mode}_${p.tree_target}`;
 }
 
 function updateScenario() {
@@ -331,21 +343,22 @@ function renderBars(scenario, params) {
   const mode = params.area_mode;
   const targets = meta.area_targets[mode];
   const total = meta.n_crop_cells;
+  const treeTgt = params.tree_target;
+  const treeMax = Math.min(treeTgt + 0.10, 0.30);
 
   const crops = [
-    { name: "Rice",    key: "Rice",    cls: "rice",    color: "#2ca02c" },
-    { name: "Maize",   key: "Maize",   cls: "maize",   color: "#FFD700" },
-    { name: "SoyBean", key: "SoyBean", cls: "soybean", color: "#FF8C00" },
+    { name: "Rice",    key: "Rice",    cls: "rice" },
+    { name: "Maize",   key: "Maize",   cls: "maize" },
+    { name: "SoyBean", key: "SoyBean", cls: "soybean" },
+    { name: "Tree",    key: "Tree",    cls: "tree" },
   ];
 
   let html = "";
   crops.forEach(c => {
-    const count = scenario.final_counts[c.key];
+    const count = scenario.final_counts[c.key] || 0;
     const pct = (count / total * 100);
-    const initCount = meta.initial_counts[c.key];
-    const initPct = (initCount / total * 100);
-    const minPct = targets.min[c.key] * 100;
-    const maxPct = targets.max[c.key] * 100;
+    const minPct = c.key === "Tree" ? treeTgt * 100 : (targets.min[c.key] || 0) * 100;
+    const maxPct = c.key === "Tree" ? treeMax * 100 : (targets.max[c.key] || 0) * 100;
 
     html += `<div class="bar-row">
       <span class="crop-name">${c.name}</span>
@@ -369,6 +382,7 @@ function preloadNeighbors(params) {
     { key: "maize_profit", slider: "s-maize", values: AXES.maize_profit },
     { key: "soy_profit",   slider: "s-soy",   values: AXES.soy_profit },
     { key: "trans_scale",  slider: "s-trans", values: AXES.trans_scale },
+    { key: "tree_target",  slider: "s-tree",  values: AXES.tree_target },
   ];
 
   axes.forEach(ax => {
