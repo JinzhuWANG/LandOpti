@@ -16,12 +16,10 @@ from gurobipy import GRB
 import time
 
 from step_2_setup_cost import (
-    COST,
     CROPS,
     N_CELLS,
     N_CROPS,
     PROFIT,
-    REVENUE,
     AREA_TARGET,
     TRANS_COST,
     crop_indices,
@@ -44,29 +42,20 @@ m = gp.Model("LandUseOptimisation")
 m.Params.LogToConsole = 1
 
 # Decision variables: x[i, j] = 1 if crop cell i is assigned to crop j
-x = m.addVars(N_CELLS, N_CROPS, vtype=GRB.BINARY, name="x")
+x = m.addMVar((N_CELLS, N_CROPS), vtype=GRB.BINARY, name="x")
 
-# Objective: maximise total net benefit
-obj = gp.quicksum(
-    net_benefit[i, j] * x[i, j]
-    for i in range(N_CELLS)
-    for j in range(N_CROPS)
-)
-m.setObjective(obj, GRB.MAXIMIZE)
+# Objective: maximise total net benefit (vectorised dot product)
+m.setObjective((net_benefit * x).sum(), GRB.MAXIMIZE)
 
 # Constraint 1: each cell assigned to exactly one crop
-for i in range(N_CELLS):
-    m.addConstr(
-        gp.quicksum(x[i, j] for j in range(N_CROPS)) == 1,
-        name=f"assign_{i}"
-    )
+m.addConstr(x.sum(axis=1) == 1, name="assign")
 
 # Constraint 2: area targets (fraction of crop cells, excluding urban)
+col_sums = x.sum(axis=0)  # shape (N_CROPS,)
 for j, crop in enumerate(CROPS):
-    total_j = gp.quicksum(x[i, j] for i in range(N_CELLS))
     lo, hi = AREA_TARGET[crop]
-    m.addConstr(total_j >= lo * N_CELLS, name=f"min_{crop}")
-    m.addConstr(total_j <= hi * N_CELLS, name=f"max_{crop}")
+    m.addConstr(col_sums[j] >= lo * N_CELLS, name=f"min_{crop}")
+    m.addConstr(col_sums[j] <= hi * N_CELLS, name=f"max_{crop}")
 
 build_time = time.time() - t0
 print(f"Model built in {build_time:.2f}s — {m.NumVars} vars, {m.NumConstrs} constraints")
@@ -82,11 +71,7 @@ if m.Status == GRB.OPTIMAL:
     print(f"\nOptimal solution found in {solve_time:.2f}s")
 
     # Extract optimal assignment for each crop cell
-    opt_map = np.zeros(N_CELLS, dtype=int)
-    for i in range(N_CELLS):
-        for j in range(N_CROPS):
-            if x[i, j].X > 0.5:
-                opt_map[i] = j
+    opt_map = x.X.argmax(axis=1).astype(int)
 
     # Count changes
     changes = int(np.sum(opt_map != initial_map))
@@ -94,9 +79,8 @@ if m.Status == GRB.OPTIMAL:
     # Final counts (Tree cells that were originally non-Tree are also counted as changes)
     final_counts = {c: int(np.sum(opt_map == k)) for k, c in enumerate(CROPS)}
 
-    # Cost breakdown
-    total_revenue = sum(REVENUE[CROPS[j]] * final_counts[CROPS[j]] for j in range(N_CROPS))
-    total_cost = sum(COST[CROPS[j]] * final_counts[CROPS[j]] for j in range(N_CROPS))
+    # Breakdown
+    total_profit = sum(PROFIT[CROPS[j]] * final_counts[CROPS[j]] for j in range(N_CROPS))
     total_trans = 0.0
     for i in range(N_CELLS):
         orig, new = initial_map[i], opt_map[i]
@@ -105,8 +89,7 @@ if m.Status == GRB.OPTIMAL:
 
     # ── Print results ────────────────────────────────────────────────────────
     print(f"\nObjective (net profit): {m.ObjVal:,.0f}")
-    print(f"  Revenue:         {total_revenue:,.0f}")
-    print(f"  Operating cost:  -{total_cost:,.0f}")
+    print(f"  Gross profit:    {total_profit:,.0f}")
     print(f"  Transition cost: -{total_trans:,.0f}")
     print(f"  Distance cost:   -{total_dist:,.0f}")
     print(f"\nCells changed: {changes} / {N_CELLS} ({100 * changes / N_CELLS:.1f}%)")
@@ -142,8 +125,6 @@ if m.Status == GRB.OPTIMAL:
     import json
     result = {
         "crops": CROPS,
-        "revenue": REVENUE,
-        "cost": COST,
         "profit": PROFIT,
         "trans_cost": {f"{f}->{t}": v for (f, t), v in TRANS_COST.items()},
         "targets": {crop: {"min": lo, "max": hi} for crop, (lo, hi) in AREA_TARGET.items()},
@@ -153,8 +134,7 @@ if m.Status == GRB.OPTIMAL:
         "n_urban_cells": n_urban,
         "cells_changed": changes,
         "obj_val": round(m.ObjVal),
-        "total_revenue": round(total_revenue),
-        "total_cost": round(total_cost),
+        "total_profit": round(total_profit),
         "total_trans": round(total_trans),
         "total_dist": round(total_dist),
         "solve_time": round(solve_time, 3),
