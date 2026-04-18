@@ -42,10 +42,10 @@ from step_2_setup_cost import (
 
 # ── Parameter grid ────────────────────────────────────────────────────────────
 
-PROFIT_RICE   = [450, 550, 650, 750, 850]
-PROFIT_MAIZE  = [400, 500, 600, 700, 800]
-PROFIT_SOY    = [450, 550, 650, 750, 850]
-TRANS_SCALES  = [0.0, 0.5, 1.0, 1.5]
+PROFIT_RICE   = [300, 450, 600, 750, 900]
+PROFIT_MAIZE  = [200, 350, 500, 650, 800]
+PROFIT_SOY    = [250, 400, 550, 700, 850]
+TRANS_SCALES  = [0.5, 1.0, 1.5, 2.0]
 AREA_MODES    = ["loose", "medium", "tight"]
 TREE_TARGETS  = [0.05, 0.15, 0.20]
 
@@ -203,7 +203,7 @@ def main():
     # Build grid
     if args.test:
         grid = list(itertools.product(
-            [550, 750], [500, 700], [650], [0.5, 1.0], ["medium"], [0.05, 0.15]
+            [450, 750], [350, 650], [400, 700], [0.5, 1.0], ["medium"], [0.05, 0.15]
         ))
     else:
         grid = list(itertools.product(
@@ -279,7 +279,7 @@ def main():
             "rice_profit": PROFIT_RICE if not args.test else [550, 750],
             "maize_profit": PROFIT_MAIZE if not args.test else [500, 700],
             "soy_profit": PROFIT_SOY if not args.test else [650],
-            "trans_scale": TRANS_SCALES if not args.test else [0.5, 1.0],
+            "trans_scale": TRANS_SCALES if not args.test else [0.5, 1.0],  # no 0.0
             "area_mode": AREA_MODES if not args.test else ["medium"],
             "tree_target": TREE_TARGETS if not args.test else [0.05, 0.15],
         },

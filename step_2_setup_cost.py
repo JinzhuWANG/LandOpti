@@ -15,7 +15,7 @@ import rioxarray as rxr
 
 # ── Load the land-use map ────────────────────────────────────────────────────
 lumap = rxr.open_rasterio('data/LUMAP/CDL2019_clip_RES_100_ext.tif', masked=True).squeeze()
-distance_cost = rxr.open_rasterio('data/LUMAP/town_distance.tif', masked=True).squeeze() * 100
+distance_cost = rxr.open_rasterio('data/LUMAP/town_distance.tif', masked=True).squeeze() * 2000
 
 # ── Land-use class definitions ───────────────────────────────────────────────
 CROPS = ["Rice", "Maize", "SoyBean", "Tree"]
@@ -26,30 +26,27 @@ N_LANDUSES = len(LANDUSES) # 5 (including urban)
 CROP_IDX = {c: i for i, c in enumerate(CROPS)}     # Rice:0, Maize:1, SoyBean:2
 LANDUSE_IDX = {c: i for i, c in enumerate(LANDUSES)}
 
-# ── Revenue and cost per cell (yuan/cell/year) ───────────────────────────────
-REVENUE = {"Rice": 1200, "Maize": 1000, "SoyBean": 1100, "Tree": 0}
-COST    = {"Rice": 550,  "Maize": 400,  "SoyBean": 450,  "Tree": 0}
-PROFIT  = {c: REVENUE[c] - COST[c] for c in CROPS}
-# => Rice: 650, Maize: 600, SoyBean: 650, Tree: 0
+# ── Net profit per cell (yuan/cell/year) ─────────────────────────────────────
+PROFIT = {"Rice": 650, "Maize": 600, "SoyBean": 650, "Tree": 0}
 
 # ── Transition costs (from -> to), 0 if same crop ────────────────────────────
 # Only defined for crop-to-crop transitions (Urban cells are fixed)
 TRANS_COST = {
     ("Rice",    "Rice"):    0,
-    ("Rice",    "Maize"):   350,
-    ("Rice",    "SoyBean"): 300,
-    ("Rice",    "Tree"):    500,
-    ("Maize",   "Rice"):    380,
+    ("Rice",    "Maize"):   120,
+    ("Rice",    "SoyBean"): 100,
+    ("Rice",    "Tree"):    200,
+    ("Maize",   "Rice"):    130,
     ("Maize",   "Maize"):   0,
-    ("Maize",   "SoyBean"): 280,
-    ("Maize",   "Tree"):    500,
-    ("SoyBean", "Rice"):    360,
-    ("SoyBean", "Maize"):   300,
+    ("Maize",   "SoyBean"): 90,
+    ("Maize",   "Tree"):    200,
+    ("SoyBean", "Rice"):    120,
+    ("SoyBean", "Maize"):   100,
     ("SoyBean", "SoyBean"): 0,
-    ("SoyBean", "Tree"):    500,
-    ("Tree",    "Rice"):    600,
-    ("Tree",    "Maize"):   600,
-    ("Tree",    "SoyBean"): 600,
+    ("SoyBean", "Tree"):    200,
+    ("Tree",    "Rice"):    250,
+    ("Tree",    "Maize"):   250,
+    ("Tree",    "SoyBean"): 250,
     ("Tree",    "Tree"):    0,
 }
 
@@ -111,7 +108,7 @@ for j, crop in enumerate(CROPS):
     cnt = int(np.sum(initial_map == j))
     print(f"  {crop}: {cnt} cells ({100 * cnt / N_CELLS:.1f}%)")
 
-print(f"\nProfit per cell: {PROFIT}")
+print(f"\nNet profit per cell: {PROFIT}")
 print(f"Transition cost matrix:\n{trans_arr}")
 print(f"\nNet benefit array shape: {net_benefit.shape}")
 print(f"Setup complete — ready for optimisation.")
